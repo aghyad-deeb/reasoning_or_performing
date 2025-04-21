@@ -1,0 +1,44 @@
+Analysis of MMLU Reasoning Lengths (Top 5 Valid & Correct Responses)
+================================================================================
+
+Total entries analyzed: 5
+Average token count: 3589.20
+Median token count: 3490.00
+Min token count: 3199
+Max token count: 4512
+
+
+Entry 76:
+Question ID: 75
+Token Count: 4512
+Response saved to: analysis/responses/entry_76_tokens_4512_response.txt
+Reasoning saved to: analysis/reasoning/entry_76_tokens_4512_reasoning.txt
+----------------------------------------
+
+Entry 69:
+Question ID: 68
+Token Count: 3511
+Response saved to: analysis/responses/entry_69_tokens_3511_response.txt
+Reasoning saved to: analysis/reasoning/entry_69_tokens_3511_reasoning.txt
+----------------------------------------
+
+Entry 10:
+Question ID: 9
+Token Count: 3490
+Response saved to: analysis/responses/entry_10_tokens_3490_response.txt
+Reasoning saved to: analysis/reasoning/entry_10_tokens_3490_reasoning.txt
+----------------------------------------
+
+Entry 96:
+Question ID: 95
+Token Count: 3234
+Response saved to: analysis/responses/entry_96_tokens_3234_response.txt
+Reasoning saved to: analysis/reasoning/entry_96_tokens_3234_reasoning.txt
+----------------------------------------
+
+Entry 12:
+Question ID: 11
+Token Count: 3199
+Response saved to: analysis/responses/entry_12_tokens_3199_response.txt
+Reasoning saved to: analysis/reasoning/entry_12_tokens_3199_reasoning.txt
+----------------------------------------
