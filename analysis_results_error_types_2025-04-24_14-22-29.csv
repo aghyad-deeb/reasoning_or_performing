@@ -1,0 +1,9 @@
+error_type,count
+B (should be C),6
+B (should be A),6
+A (should be C),3
+C (should be B),3
+D (should be C),2
+A (should be B),1
+D (should be B),1
+C (should be A),1

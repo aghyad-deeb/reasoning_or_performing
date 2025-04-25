@@ -1,5 +1,7 @@
 
-#? -what temprature should I use
+
+#! Notes: The model include it's last answer in the last part of the reasoning
+#! so masking that may be important
 import torch
 # from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
@@ -8,6 +10,10 @@ from nnsight import CONFIG, LanguageModel
 import os
 import pandas as pd
 import re
+import glob
+import os.path
+
+END_OF_THINK_TOKEN = 128014
 
 remote = False
 device = ""
@@ -33,7 +39,6 @@ def load_model_and_tokenizer(model_name=""):
     tokenizer = model.tokenizer
         
     return model, tokenizer
-
 def mask_attention_between_tokens(input_tokens, attention_mask, start_token, end_token, start_token_instance=0, end_token_instance=-1, start_offset=0, end_offset=0):
     """
     Masks attention values between specified start and end tokens, with optional offsets.
@@ -99,7 +104,7 @@ def mask_attention_between_tokens(input_tokens, attention_mask, start_token, end
     
     # Check if start index is after end index
     if start_idx > end_idx:
-        raise Exception(f"Start token at position {start_idx} appears after end token at position {end_idx}")
+        raise Exception(f"Start token at position {start_idx=} appears after end token at position {end_idx=}, {start_token=}, {end_token=}, {start_token_instance=}, {end_token_instance=}")
     
     # Set attention values between start and end tokens to 0
     masked_attention[start_idx:end_idx+1] = 0
@@ -153,7 +158,7 @@ def count_instances_of_token(tensor, token):
         return (tensor == token).sum().item()
 
 
-def generate_with_masking(model, tokenizer, original_prompt, token_to_mask, correct_answer, max_new_tokens=5000):
+def generate_with_masking(model, tokenizer, original_prompt, token_to_mask, correct_answer, prompt_basename, max_new_tokens=5000):
     inputs = tokenizer(original_prompt, return_tensors="pt")
     inputs_lst = []
     respones_lst = []
@@ -182,26 +187,41 @@ def generate_with_masking(model, tokenizer, original_prompt, token_to_mask, corr
     time_str = current_time.strftime("%Y-%m-%d_%H-%M-%S")
     
     # Create filename with dataset info and timestamp
-    results_file = f"masking_output/{time_str}.csv"
+    results_dir = "masking_output"
+    os.makedirs(results_dir, exist_ok=True)
+    results_file = os.path.join(results_dir, f"{prompt_basename}_{time_str}.csv")
     
     for i in range(num_iter):
-        for j in range(i + 1, num_iter):
+        for j in range(i, num_iter):
             curr_inputs = dict()
             # clone and remove batch dimension
             for k, t in inputs.items():
                 print(f"{k=}")
                 curr_inputs[k] = t.clone().squeeze(0)
-
-            curr_inputs["attention_mask"] = mask_attention_between_tokens(
-                curr_inputs["input_ids"],
-                curr_inputs["attention_mask"],
-                token_to_mask,
-                token_to_mask,
-                start_token_instance=i,
-                end_token_instance=j,
-                start_offset=0,
-                end_offset=0
-            )
+            
+            # mask everything from `token_to_mask` till the end of the COT
+            if i == j:
+                curr_inputs["attention_mask"] = mask_attention_between_tokens(
+                    curr_inputs["input_ids"],
+                    curr_inputs["attention_mask"],
+                    token_to_mask,
+                    END_OF_THINK_TOKEN,
+                    start_token_instance=i,
+                    end_token_instance=-1,
+                    start_offset=0,
+                    end_offset=-1, # include the end of think token
+                )
+            else:
+                curr_inputs["attention_mask"] = mask_attention_between_tokens(
+                    curr_inputs["input_ids"],
+                    curr_inputs["attention_mask"],
+                    token_to_mask,
+                    token_to_mask,
+                    start_token_instance=i,
+                    end_token_instance=j,
+                    start_offset=0,
+                    end_offset=0
+                )
 
             for k, t in curr_inputs.items():
                 curr_inputs[k] = t.unsqueeze(0)
@@ -261,15 +281,62 @@ def main():
     model_name = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
     model, tokenizer = load_model_and_tokenizer()
 
-    original_prompt = open("prompt.txt", "r").read()
+    # Define default parameters (these might be overridden by prompt file info)
+    # correct_answer = "B" # Removed, will be read from file
+    token_to_mask = 14524 # Assuming this is constant
+    max_new_tokens = 200 # Assuming this is constant
 
-    
-    correct_answer = "B"
-    token_to_mask = 14524
-    max_new_tokens = 200
-    
-    # Generate response using the new function
-    out = generate_with_masking(model, tokenizer, original_prompt, token_to_mask, correct_answer, max_new_tokens=max_new_tokens)
+    # Get list of prompt files
+    prompt_dir = "prompts"
+    prompt_files = glob.glob(os.path.join(prompt_dir, "*.txt"))
+
+    if not prompt_files:
+        print(f"No .txt files found in the '{prompt_dir}' directory.")
+        return
+
+    # Process each prompt file
+    for prompt_file_path in prompt_files:
+        print(f"\n--- Processing prompt file: {prompt_file_path} ---")
+        
+        # Extract basename for filename generation
+        prompt_basename = os.path.splitext(os.path.basename(prompt_file_path))[0]
+        
+        # Read the prompt content
+        try:
+            with open(prompt_file_path, "r") as f:
+                lines = f.readlines()
+            
+            if not lines:
+                print(f"Error: Prompt file {prompt_file_path} is empty.")
+                continue
+
+            # Prompt file includes answer in last line, extract answer from the
+            # last line
+            correct_answer = lines[-1].strip()
+            if not correct_answer: # Check if the last line was just whitespace
+                 print(f"Error: Last line of {prompt_file_path} is empty or whitespace. Cannot determine correct answer.")
+                 continue
+
+            # Use all lines except the last as the prompt
+            original_prompt = "".join(lines[:-1])
+            if not original_prompt.strip(): # Check if prompt content is empty
+                print(f"Warning: Prompt content in {prompt_file_path} (excluding last line) is empty.")
+                # Decide if you want to continue or skip
+                # continue 
+
+        except Exception as e:
+            print(f"Error reading file {prompt_file_path}: {e}")
+            continue # Skip to the next file if reading fails
+        
+        # Generate response using the new function, passing the basename and extracted answer
+        try:
+            print(f"Using correct answer: '{correct_answer=}', {original_prompt[-20:]=}")
+            out = generate_with_masking(model, tokenizer, original_prompt, token_to_mask, correct_answer, prompt_basename, max_new_tokens=max_new_tokens)
+            print(f"Finished processing {prompt_file_path}")
+        except Exception as e:
+            print(f"Error processing prompt from file {prompt_file_path}: {e}")
+            # Decide if you want to stop or continue with the next file
+            continue 
         
     
 if __name__ == "__main__":
